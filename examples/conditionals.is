@@ -1,0 +1,142 @@
+# conditionals.is - Demonstrates various conditional structures in Fluent
+
+define categorize_value
+    inputs:
+        - value (number)
+        - low_threshold (number optional 10)
+        - high_threshold (number optional 20)
+
+    # Categorize based on thresholds
+    if value < low_threshold:
+        initialize category = "Low"
+    elif value < high_threshold: # Check if between low and high
+        initialize category = "Medium"
+    else: # If >= high_threshold
+        initialize category = "High"
+    
+    print "Value: " + str(value) + " is categorized as: " + category
+    
+    return category
+
+define check_parity
+    inputs:
+        - number (number)
+    
+    initialize result = ""
+    
+    # Simple if/else to check if number is even or odd
+    if number % 2 == 0:
+        initialize result = "Even"
+    else:
+        initialize result = "Odd"
+    
+    print "Number " + str(number) + " is " + result
+    
+    return result
+
+# New function: Determine the size of a number
+define size_classifier
+    inputs:
+        - number (number)
+        - ranges (list optional [10, 100, 1000])
+    
+    initialize size = ""
+    
+    # Using a more complex if/elif/else chain
+    if number < 0:
+        initialize size = "Negative"
+    elif number == 0:
+        initialize size = "Zero"
+    elif number < ranges[0]:
+        initialize size = "Tiny"
+    elif number < ranges[1]:
+        initialize size = "Small"
+    elif number < ranges[2]:
+        initialize size = "Medium"
+    else:
+        initialize size = "Large"
+    
+    print "The number " + str(number) + " is classified as: " + size
+    
+    return size
+
+# New function: Guess the type of day based on temperature
+define describe_weather
+    inputs:
+        - temperature (number)
+        - is_raining (number optional 0) # 0=false, 1=true
+        - is_snowing (number optional 0) # 0=false, 1=true
+    
+    initialize description = ""
+    
+    # Nested conditions with multiple factors
+    if temperature < 0:
+        if is_snowing == 1:
+            initialize description = "Cold and snowy"
+        else:
+            initialize description = "Freezing cold"
+    elif temperature < 15:
+        if is_raining == 1:
+            initialize description = "Cold and rainy"
+        else:
+            initialize description = "Chilly"
+    elif temperature < 25:
+        if is_raining == 1:
+            initialize description = "Mild but wet"
+        else:
+            initialize description = "Pleasant"
+    else:
+        if is_raining == 1:
+            initialize description = "Warm and rainy"
+        else:
+            initialize description = "Hot"
+    
+    print "Weather description: " + description
+    
+    return description
+
+# Test with different values
+print "\nTesting categorize_value function:"
+# Should be Low
+categorize_value 5
+# Should be Medium
+categorize_value 15
+# Should be High
+categorize_value 25
+
+# Test with custom thresholds
+print "\nTesting with custom thresholds:"
+# Should be Medium
+categorize_value 50, 40, 60
+
+print "\nTesting check_parity function:"
+# Should be Even
+check_parity 4
+# Should be Odd
+check_parity 7
+
+print "\nTesting size_classifier function:"
+# Should be Negative
+size_classifier -5
+# Should be Zero
+size_classifier 0
+# Should be Tiny
+size_classifier 5
+# Should be Small
+size_classifier 50
+# Should be Medium
+size_classifier 500
+# Should be Large
+size_classifier 5000
+
+print "\nTesting describe_weather function:"
+# Cold and snowy
+describe_weather -10, 0, 1
+# Freezing cold
+describe_weather -5, 0, 0
+# Cold and rainy
+describe_weather 10, 1, 0
+# Pleasant
+describe_weather 20, 0, 0
+# Warm and rainy
+describe_weather 30, 1, 0

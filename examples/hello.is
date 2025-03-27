@@ -1,0 +1,21 @@
+# hello.is - Simple Fluent greeting example
+
+# Define a function that takes a name and prints a greeting
+define greet_user
+    inputs:
+        - name (string optional "World") # Optional name parameter with default
+
+    # Create a greeting message
+    initialize greeting = "Hello, " + name + "!"
+    
+    # Print the greeting
+    print greeting
+    
+    return greeting
+
+# Call the function with different values
+print "Calling with no arguments (uses default):"
+greet_user
+
+print "Calling with a custom name:"
+greet_user "Fluent User"

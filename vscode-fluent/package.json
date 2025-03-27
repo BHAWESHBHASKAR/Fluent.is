@@ -1,0 +1,26 @@
+{
+    "name": "vscode-fluent",
+    "displayName": "Fluent Language",
+    "description": "Syntax highlighting for Fluent (.is) language files",
+    "version": "0.1.0",
+    "engines": {
+        "vscode": "^1.60.0"
+    },
+    "categories": [
+        "Programming Languages"
+    ],
+    "contributes": {
+        "languages": [{
+            "id": "fluent",
+            "aliases": ["Fluent", "fluent"],
+            "extensions": [".is"],
+            "configuration": "./language-configuration.json"
+        }],
+        "grammars": [{
+            "language": "fluent",
+            "scopeName": "source.fluent",
+            "path": "./syntaxes/fluent.tmLanguage.json"
+        }]
+
+    }
+}

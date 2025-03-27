@@ -1,0 +1,37 @@
+# get_grade.is - Demonstrates if/elif/else functionality
+
+define get_grade
+    inputs:
+        - score (number)
+
+    # Determine letter grade based on score
+    if score >= 90:
+        initialize grade = "A"
+    elif score >= 80:
+        initialize grade = "B"
+    elif score >= 70:
+        initialize grade = "C"
+    elif score >= 60:
+        initialize grade = "D"
+    else:
+        initialize grade = "F"
+    
+    # Print the result
+    print "Score: " + str(score) + " -> Grade: " + grade
+    
+    return grade
+
+# Test with various scores
+print "Testing various scores:"
+# Should get an A
+get_grade 95
+# Should get a B
+get_grade 85
+# Should get a C
+get_grade 75
+# Should get a D
+get_grade 65
+# Should get an F
+get_grade 55
+# Should get an F
+get_grade 0
