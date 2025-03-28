@@ -11,6 +11,60 @@ Fluent features:
 - Rich standard library
 - Seamless integration with Python ecosystem
 
+## Project Structure
+
+- `backend/fluent_grammar.lark`: Formal grammar for the Lark parser
+- `backend/ast_nodes.py`: Abstract Syntax Tree node classes
+- `backend/ast_transformer.py`: Lark Transformer to build the custom AST
+- `backend/transpiler.py`: Walks the AST and generates Python code
+- `backend/fluent_stdlib_map.py`: Maps Fluent standard library functions to Python
+- `backend/main.py`: Entry point to run the transpiler
+- `backend/examples/`: Example Fluent (.is) files
+  - `greeting.is`: A simple greeting program
+  - `find_max.is`: Finds the maximum value in a list
+  - `word_count.is`: Counts occurrences of words in a text
+  - `bubble_sort.is`: Implementation of the bubble sort algorithm
+
+## Requirements
+
+- Python 3.6+
+- lark-parser
+
+## Installation
+
+Install the required dependencies:
+
+```bash
+pip install lark-parser
+```
+
+If pip is not available, you may need to install it first:
+
+```bash
+# For Ubuntu/Debian
+sudo apt install python3-pip
+
+# For macOS (using Homebrew)
+brew install python
+
+# For Windows
+# Download and run the official Python installer from python.org
+```
+
+## Usage
+
+To transpile and run a Fluent file:
+
+```bash
+python backend/main.py path/to/your/program.is
+```
+
+This will:
+1. Parse the Fluent code
+2. Transform it into an Abstract Syntax Tree
+3. Transpile it to equivalent Python code
+4. Execute the generated Python code
+
 ## Language Structure
 
 ### Basic Syntax
@@ -175,20 +229,6 @@ The Fluent language implementation includes:
 3. **AST Transformer** (`ast_transformer.py`): Transforms parse trees into AST
 4. **Transpiler** (`transpiler.py`): Converts AST to executable Python code
 5. **Standard Library** (`fluent_stdlib_map.py`): Maps Fluent standard library functions to Python
-
-## Running Fluent Programs
-
-To run a Fluent program:
-
-```bash
-python main.py path/to/your/program.is
-```
-
-This will:
-1. Parse the Fluent code
-2. Transform it to an AST
-3. Transpile it to Python
-4. Execute the resulting Python code
 
 ## Development
 
