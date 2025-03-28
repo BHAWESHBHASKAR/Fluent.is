@@ -1,0 +1,58 @@
+// Bubble Sort implementation in Fluent
+
+// Function to swap elements in a list
+FUNCTION swap(numbers: LIST<INTEGER>, i: INTEGER, j: INTEGER): NOTHING
+  temp: INTEGER = GET_ELEMENT(numbers, i)
+  // Set value at index i to value at index j
+  SET_ELEMENT(numbers, i, GET_ELEMENT(numbers, j))
+  // Set value at index j to temporary value
+  SET_ELEMENT(numbers, j, temp)
+END
+
+// Function to perform bubble sort on a list
+FUNCTION bubble_sort(numbers: LIST<INTEGER>): NOTHING
+  // Handle empty list case
+  IF GET_LENGTH(numbers) == 0 THEN
+    RETURN
+  END
+  
+  n: INTEGER = GET_LENGTH(numbers)
+  i: INTEGER = 0
+  
+  WHILE i < n DO
+    j: INTEGER = 0
+    
+    // Inner loop for comparisons
+    WHILE j < (n - i - 1) DO
+      // If current element is greater than next element, swap them
+      IF GET_ELEMENT(numbers, j) > GET_ELEMENT(numbers, j + 1) THEN
+        swap(numbers, j, j + 1)
+      END
+      
+      // Move to next pair
+      j = j + 1
+    END
+    
+    // Move to next pass
+    i = i + 1
+  END
+END
+
+// Main program
+// Create an unsorted list
+unsorted_list: LIST<INTEGER> = [64, 34, 25, 12, 22, 11, 90]
+
+// Print unsorted list
+PRINT(CONCATENATE_STRINGS("Unsorted list: ", LIST_TO_STRING(unsorted_list)))
+
+// Sort the list
+bubble_sort(unsorted_list)
+
+// Print sorted list
+PRINT(CONCATENATE_STRINGS("Sorted list: ", LIST_TO_STRING(unsorted_list)))
+
+// Test with another list
+test_list: LIST<INTEGER> = [5, 1, 4, 2, 8]
+PRINT(CONCATENATE_STRINGS("Test list before: ", LIST_TO_STRING(test_list)))
+bubble_sort(test_list)
+PRINT(CONCATENATE_STRINGS("Test list after: ", LIST_TO_STRING(test_list)))

@@ -17,7 +17,33 @@ class ASTTransformer(Transformer):
         return ast.VariableDeclaration(get_val(name), var_type, initializer)
 
     def assignment(self, target, value):
-        return ast.Assignment(get_val(target), value)
+        # Handle target correctly whether it's an identifier token or a more complex expression
+        if hasattr(target, 'name'):
+            # It's already an identifier object
+            target_obj = target
+        elif isinstance(target, str):
+            # Convert string to identifier
+            target_obj = ast.Identifier(get_val(target))
+        else:
+            # Use as is
+            target_obj = target
+            
+        # Make sure value is also properly processed
+        if isinstance(value, tuple) and len(value) >= 3:
+            # Could be an arithmetic expression like (left, op, right)
+            left, op, right = value[0], value[1], value[2]
+            if op in ['+', '-', '*', '/']:
+                # Create a BinaryOp node
+                if op == '+':
+                    value = ast.BinaryOp(left, "ADD", right)
+                elif op == '-':
+                    value = ast.BinaryOp(left, "SUB", right)
+                elif op == '*':
+                    value = ast.BinaryOp(left, "MUL", right)
+                elif op == '/':
+                    value = ast.BinaryOp(left, "DIV", right)
+            
+        return ast.Assignment(target_obj, value)
 
     def print_statement(self, expression):
         return ast.PrintStatement(expression)
@@ -67,64 +93,91 @@ class ASTTransformer(Transformer):
         return ast.WhileStatement(condition, body_stmts)
 
     def foreach_statement(self, *args):
-        # Extract components from args
-        if len(args) < 2:
+        # Extract components from the new format
+        if len(args) < 3:
             return ast.ForeachStatement("", None, [])
             
-        item_name = args[0]
-        iterable = args[1]
+        item = args[0]  # IDENTIFIER token for the iterator
+        collection = args[1]  # Expression to iterate over
         
+        # Process body statements
+        body_stmts = []
         if len(args) > 2:
-            body = args[2:]
-        else:
-            body = []
-            
-        body_stmts = list(body) if isinstance(body, tuple) else [body] if body else []
-        return ast.ForeachStatement(get_val(item_name), iterable, body_stmts)
+            for stmt in args[2:]:
+                # Special handling for assignments in foreach body
+                if isinstance(stmt, ast.Assignment) and hasattr(stmt, 'value'):
+                    if isinstance(stmt.value, tuple) and len(stmt.value) >= 3:
+                        # This is likely an arithmetic expression (left op right)
+                        left, op, right = stmt.value[0], stmt.value[1], stmt.value[2]
+                        # Create a BinaryOp node
+                        binary_op = None
+                        op_str = str(op).strip() if hasattr(op, '__str__') else ""
+                        
+                        if op_str == '+' or (hasattr(op, 'value') and op.value == '+'):
+                            binary_op = ast.BinaryOp(left, "ADD", right)
+                        elif op_str == '-' or (hasattr(op, 'value') and op.value == '-'):
+                            binary_op = ast.BinaryOp(left, "SUB", right)
+                        elif op_str == '*' or (hasattr(op, 'value') and op.value == '*'):
+                            binary_op = ast.BinaryOp(left, "MUL", right)
+                        elif op_str == '/' or (hasattr(op, 'value') and op.value == '/'):
+                            binary_op = ast.BinaryOp(left, "DIV", right)
+                            
+                        if binary_op:
+                            # Replace the tuple with a proper BinaryOp node
+                            stmt.value = binary_op
+                body_stmts.append(stmt)
+        
+        # Create a ForeachStatement with appropriate field names
+        return ast.ForeachStatement(item, collection, body_stmts)
 
-    def function_definition(self, *args):
-        # Extract components from a variable number of args
-        if len(args) < 1:
-            return ast.FunctionDefinition("", [], None, [])
+    def function_definition(self, name, params=None, return_type=None, *body):
+        """Process function definition with name, parameters, return type and body statements"""
+        # Handle the name - convert from Token if needed
+        name = get_val(name)
+        
+        # Ensure parameters is a list
+        if params is None:
+            params = []
+        elif isinstance(params, list) and len(params) == 1 and isinstance(params[0], list):
+            # Handle nested list case from parameter_list
+            params = params[0]
             
-        name = args[0]
-        
-        # Find parameters and return type in the argument list
-        param_index = -1
-        return_type_index = -1
-        
-        for i, arg in enumerate(args):
-            if isinstance(arg, list) and all(hasattr(p, 'name') for p in arg if p is not None):
-                param_index = i
-            elif hasattr(arg, 'name') and arg.name in ["INTEGER", "FLOAT", "STRING", "BOOLEAN", "NULLTYPE", "LIST", "MAP"]:
-                return_type_index = i
-                
-        # Extract parameters if found
-        params = args[param_index] if param_index != -1 else None
-        
-        # Extract return type if found
-        return_type = args[return_type_index] if return_type_index != -1 else None
-        
-        # Find body statements (should be everything after the header elements)
-        body_start_index = max(1, param_index, return_type_index) + 1
-        if body_start_index < len(args):
-            body_stmts = args[body_start_index:]
-        else:
-            body_stmts = []
-                
-        # Handle case where params might be missing (None)
-        param_list = list(params) if isinstance(params, tuple) else [params] if params else []
-        
-        # Create the function definition
-        return ast.FunctionDefinition(get_val(name), param_list, return_type, list(body_stmts))
+        # Handle return type
+        if return_type is None:
+            # Default to NULLTYPE if no return type specified
+            return_type = ast.Type("NULLTYPE")
+        elif return_type == "NOTHING":
+            # Convert NOTHING to Python's None
+            return_type = ast.Type("NULLTYPE")
+            
+        # Clean up the body statements (filter out None values)
+        body_statements = [stmt for stmt in body if stmt is not None]
+            
+        # Create and return the FunctionDefinition node
+        return ast.FunctionDefinition(name, params, return_type, body_statements)
+
+    def parameter_list(self, *params):
+        """Process a parameter list containing multiple parameters"""
+        return list(params)
 
     def parameters(self, *params):
          # This rule collects multiple parameters separated by commas
         return list(params)
 
-    def parameter(self, name, param_type):
-        return ast.Parameter(get_val(name), param_type)
-
+    def parameter(self, *args):
+        """Process parameter declarations in both old and new styles"""
+        if len(args) == 2:
+            # New style: name: type
+            name, param_type = args
+            return ast.Parameter(get_val(name), param_type)
+        elif len(args) == 3:
+            # Old style: PARAM name AS type
+            _, name, param_type = args
+            return ast.Parameter(get_val(name), param_type)
+        else:
+            # Handle unexpected format
+            raise ValueError(f"Unexpected parameter format: {args}")
+            
     def return_statement(self, expression=None):
         return ast.ReturnStatement(expression)
 
@@ -135,11 +188,18 @@ class ASTTransformer(Transformer):
         return None # Don't include comments in the AST
 
     # --- Types ---
-    def basetype(self, token=None):
-        if token is None:
-            # Called without arguments from the grammar rule
-            return ast.Type("UNKNOWN")
-        return ast.Type(get_val(token))
+    def basetype(self, type_name=None):
+        """Process basic types including 'NOTHING' type"""
+        if type_name is None:
+            # Handle the case when basetype is called without arguments
+            # This might happen if the rule is matched but no token is provided
+            return ast.Type("NULLTYPE")
+            
+        type_str = get_val(type_name)
+        if type_str == "NOTHING":
+            # Map NOTHING to NULLTYPE for compatibility
+            type_str = "NULLTYPE"
+        return ast.Type(type_str)
 
     def list_type(self, element_type):
         return ast.ListType(element_type)
@@ -158,41 +218,116 @@ class ASTTransformer(Transformer):
             return left
         return ast.BinaryOp(left, "AND", right)
     
-    def comparison(self, left, op=None, right=None):
-        if op is None or right is None:  # No comparison operator was present
-            return left  # Just pass the arith_expr through
-        return ast.BinaryOp(left, get_val(op), right)
-    
-    def comp_op(self, op=None):
-        if op is None:
-            return None
-        return op
-    
+    def eq(self, *args):
+        return "=="
+        
+    def neq(self, *args):
+        return "!="
+        
+    def lt(self, *args):
+        return "<"
+        
+    def gt(self, *args):
+        return ">"
+        
+    def lte(self, *args):
+        return "<="
+        
+    def gte(self, *args):
+        return ">="
+        
+    def comparison(self, left, op, right):
+        """Process comparison expressions with the correct operators"""
+        # Map the comparison operator token to the actual operator
+        op_str = op
+        return ast.Comparison(left, op_str, right)
+
     def arith_expr(self, left, op=None, right=None): 
+        # Process arithmetic expression
         if op is None or right is None:
             return left
-        return ast.BinaryOp(left, get_val(op), right)
-    
+            
+        # Get the operator value safely
+        if hasattr(op, 'value'):
+            op_val = get_val(op)
+        else:
+            op_val = str(op).strip()
+            
+        # Create the appropriate binary operation based on operator
+        if op_val == '+':
+            return ast.BinaryOp(left, "ADD", right)
+        elif op_val == '-':
+            return ast.BinaryOp(left, "SUB", right)
+        elif op_val == '*':
+            return ast.BinaryOp(left, "MUL", right)
+        elif op_val == '/':
+            return ast.BinaryOp(left, "DIV", right)
+        else:
+            return ast.BinaryOp(left, op_val, right)
+
     def term(self, left, op=None, right=None): 
         if op is None or right is None:
             return left
         return ast.BinaryOp(left, get_val(op), right)
     
     def factor(self, *args):
+        # Handle unary operations like negation
         if len(args) == 1:  # It's just an atom
             return args[0]
         else:  # It's unary_op factor
             op, operand = args
-            return ast.UnaryOp(get_val(op), operand)
+            op_str = str(op).strip()
+            
+            # Check for negation with an integer literal
+            if op_str == "-" and isinstance(operand, ast.Literal) and operand.type == "INTEGER":
+                # Create a new integer literal with negative value
+                value = -int(operand.value)
+                return ast.Literal(value, "INTEGER")
+            elif op_str == "-":
+                return ast.UnaryOp("NEG", operand)
+            elif op_str == "NOT" or op_str == "!":
+                return ast.UnaryOp("NOT", operand)
+            else:
+                return ast.UnaryOp(get_val(op), operand)
     
     def unary_op(self, op=None):
         if op is None:
             return None
         return op
 
-    def function_call(self, name, args=None):
-        arg_list = list(args) if isinstance(args, tuple) else [args] if args else []
-        return ast.FunctionCall(get_val(name), arg_list)
+    def function_call(self, name, arguments=None):
+        """Process function call with arguments"""
+        # Handle function name - could be a token or a string
+        if hasattr(name, 'value'):
+            func_name = name.value
+        else:
+            func_name = str(name)
+            
+        # Process arguments
+        args = []
+        if arguments is not None:
+            if isinstance(arguments, list):
+                args = arguments
+            else:
+                args = [arguments]
+                
+        return ast.FunctionCall(func_name, args)
+        
+    def add(self, left, right):
+        """Process addition operation"""
+        return ast.BinaryOp(left, "ADD", right)
+        
+    def sub(self, left, right):
+        """Process subtraction operation"""
+        return ast.BinaryOp(left, "SUB", right)
+        
+    def mul(self, left, right):
+        """Process multiplication operation"""
+        return ast.BinaryOp(left, "MUL", right)
+        
+    def div(self, left, right):
+        """Process division operation"""
+        return ast.BinaryOp(left, "DIV", right)
 
     def arguments(self, *args):
         # Collects multiple arguments
@@ -212,6 +347,9 @@ class ASTTransformer(Transformer):
     def NUMBER(self, n): return ast.Literal(int(get_val(n)), "INTEGER")
     def FLOAT_NUMBER(self, n): return ast.Literal(float(get_val(n)), "FLOAT")
     def STRING_LITERAL(self, s): return ast.Literal(eval(get_val(s)), "STRING") # Use eval to handle escapes
-    def BOOLEAN_LITERAL(self, b): return ast.Literal(get_val(b) == "TRUE", "BOOLEAN")
+    def BOOLEAN_LITERAL(self, b):
+        # Convert to Python boolean literal
+        value = str(b).upper() == 'TRUE'
+        return ast.Literal(value, "BOOLEAN")
     def NULL_LITERAL(self, _): return ast.Literal(None, "NULLTYPE")
     def IDENTIFIER(self, i): return ast.Identifier(get_val(i))

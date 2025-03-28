@@ -41,10 +41,10 @@ class WhileStatement(Node):
         self.body = body # List of statement nodes
 
 class ForeachStatement(Node):
-    def __init__(self, item_name, iterable, body):
-        self.item_name = item_name # IDENTIFIER token
-        self.iterable = iterable   # Expression node (e.g., a list)
-        self.body = body           # List of statement nodes
+    def __init__(self, item, collection, body):
+        self.item = item # IDENTIFIER token for the iterator variable
+        self.collection = collection # Expression node to iterate over
+        self.body = body # List of statement nodes
 
 class FunctionDefinition(Node):
     def __init__(self, name, params, return_type, body):
@@ -82,6 +82,9 @@ class MapType(Type):
         self.value_type = value_type # Type node
 
 # Expressions
+class Expression(Node):
+    pass
+
 class Literal(Node):
     def __init__(self, value, literal_type):
         self.value = value # The actual value (int, float, str, bool, None)
@@ -114,3 +117,15 @@ class ListLiteral(Node):
 class MapLiteral(Node):
     def __init__(self, entries):
         self.entries = entries # List of tuples (key_expr_node, value_expr_node)
+
+class Comparison(Expression):
+    """
+    Represents a comparison expression with a left operand, operator, and right operand.
+    """
+    def __init__(self, left, op, right):
+        self.left = left
+        self.op = op
+        self.right = right
+        
+    def __str__(self):
+        return f"Comparison({self.left} {self.op} {self.right})"

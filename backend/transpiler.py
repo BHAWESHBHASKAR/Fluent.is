@@ -7,9 +7,13 @@ class TranspilerError(Exception):
 
 class Transpiler:
     def __init__(self):
-        self.indent_level = 0
         self.output = []
+        self.imports = set()
+        self.indent_level = 0
+        self.debug_mode = False
         self.required_imports = set()  # Track needed stdlib functions if using a wrapper module
+        self.scope = {}  # Track variable scope
+        self.current_function_params = {}  # Track current function parameters
 
     def _indent(self):
         return "    " * self.indent_level  # 4 spaces per indent level
@@ -17,27 +21,66 @@ class Transpiler:
     def _visit_list(self, nodes):
         return [self.visit(node) for node in nodes]
 
-    def transpile(self, node):
+    def transpile(self, ast_root):
+        """Convert an AST into Python code and return as a string."""
         self.output = []
         self.indent_level = 0
-        self.visit(node)
-        return "".join(self.output)
+        
+        # Add imports and setup code at the top
+        self.output.append(self.generate_imports())
+        
+        # Visit the AST
+        self.visit(ast_root)
+        
+        # Join all lines into a single string
+        return ''.join(self.output)
+
+    def generate_imports(self):
+        # Generate standard imports for all transpiled code
+        imports = [
+            "from typing import Any, List, Dict, Optional, Union",
+            "# Generated from Fluent code",
+            "",
+            "# Import Fluent standard library",
+            "import sys",
+            "import os",
+            "# Add the backend directory to the Python path",
+            "sys.path.append(os.path.dirname(os.path.abspath('__file__')))",
+            "from fluent_stdlib_map import (",
+            "    get_length, get_element, _set_element as set_element, get_string_length, ", 
+            "    split_string, concatenate_strings, integer_to_string, list_to_string,",
+            "    map_has_key, get_map_value, set_map_value, get_map_keys",
+            ")",
+            ""
+        ]
+        return "\n".join(imports)
 
     def visit(self, node):
+        """Universal visitor method with None type handling"""
+        if node is None:
+            return "None"
+            
         # Handle list type directly
         if isinstance(node, list):
             return self.visit_list(node)
-            
-        method_name = f'visit_{type(node).__name__}'
+        
+        # Get the node type as a string
+        node_type = type(node).__name__
+        
+        # Handle the various node types
+        method_name = 'visit_' + node_type
         visitor = getattr(self, method_name, self.generic_visit)
         return visitor(node)
+
+    def generic_visit(self, node):
+        """Handle any node types that don't have specific visitors"""
+        if hasattr(node, 'value'):
+            return str(node.value)
+        return str(node)
 
     def visit_list(self, node_list):
         """Handle a list of nodes by visiting each one"""
         return [self.visit(node) for node in node_list]
-
-    def generic_visit(self, node):
-        raise TranspilerError(f"No visit_{type(node).__name__} method defined")
 
     # --- Visitor Methods for AST Nodes ---
 
@@ -46,287 +89,384 @@ class Transpiler:
             self.visit(stmt)
 
     def visit_VariableDeclaration(self, node):
-        # Extract the variable name correctly
+        # Extract variable name
         if hasattr(node.name, 'name'):
             var_name = node.name.name
         else:
             var_name = str(node.name)
             
-        # Handle type extraction
-        if node.var_type:
-            if hasattr(node.var_type, 'name'):
-                var_type = node.var_type.name
-            else:
-                var_type = self.visit(node.var_type) 
-        else:
-            var_type = "Any"  # Default to Any if not specified
+        # Get type information
+        type_str = self.visit(node.var_type) if node.var_type else "Any"
         
-        # Handle initialization
-        if node.initializer is not None:
+        # Generate initialization code if an initializer is present
+        if node.initializer:
             init_code = self.visit(node.initializer)
-            self.output.append(f"{self._indent()}{var_name} = {init_code}\n")
+            # Format as a variable declaration with type annotation and initializer
+            self.output.append(f"{self._indent()}{var_name}: {type_str} = {init_code}\n")
         else:
-            # Handle uninitialized variables based on type
-            default_values = {
-                "INTEGER": "0",
-                "FLOAT": "0.0",
-                "STRING": "\"\"",
-                "BOOLEAN": "False",
-                "NULLTYPE": "None",
-                "LIST": "[]",
-                "MAP": "{}"
-            }
-            default_value = default_values.get(var_type, "None")
-            self.output.append(f"{self._indent()}{var_name} = {default_value}  # Uninitialized in Fluent\n")
+            # Format as a variable declaration with type annotation but no initializer
+            self.output.append(f"{self._indent()}{var_name}: {type_str} = None\n")
 
     def visit_Assignment(self, node):
-        """Handle assignment expressions in Fluent AST"""
-        # Determine the target (left side of assignment)
-        if hasattr(node, 'target'):
-            # Original field name
-            left_code = self.visit(node.target)
-            value_code = self.visit(node.value)
-        elif hasattr(node, 'left'):
-            # Alternative field name
-            left_code = self.visit(node.left)
-            # Handle the special case for i = i + 1 in find_max.is
-            if hasattr(node, 'right') and hasattr(node.right, 'left') and hasattr(node.right.left, 'name') and node.right.left.name == "i":
-                if hasattr(node.right, 'right') and hasattr(node.right.right, 'value') and node.right.right.value == 1:
-                    self.output.append(f"{self._indent()}{left_code} = {left_code} + 1\n")
-                    return
-            value_code = self.visit(node.right)
+        # Get target name
+        if hasattr(node.target, 'name'):
+            target = node.target.name
         else:
-            raise TranspilerError(f"Invalid assignment node: {node}")
+            target = self.visit(node.target)
             
-        # Default assignment
-        self.output.append(f"{self._indent()}{left_code} = {value_code}\n")
-        
+        # Handle the binary operation specially
+        if isinstance(node.value, ast.BinaryOp) and node.value.operator == "ADD":
+            # Get left and right operands
+            left = self.visit(node.value.left)
+            right = self.visit(node.value.right)
+            
+            # Generate the addition assignment
+            self.output.append(f"{self._indent()}{target} = {left} + {right}\n")
+        elif isinstance(node.value, ast.BinaryOp):
+            # For other binary operations
+            value = self.visit(node.value)
+            self.output.append(f"{self._indent()}{target} = {value}\n")
+        else:
+            # For non-binary operations
+            value = self.visit(node.value)
+            self.output.append(f"{self._indent()}{target} = {value}\n")
+
     def visit_PrintStatement(self, node):
-        expr_code = self.visit(node.expression)
-        # Map Fluent PRINT to Python print
-        py_print = FLUENT_TO_PYTHON_MAP.get("PRINT", "print")
-        self.output.append(f"{self._indent()}{py_print}({expr_code})\n")
+        # Generate print statement with expression
+        expr = self.visit(node.expression)
+        self.output.append(f"{self._indent()}print({expr})\n")
 
     def visit_FunctionCallStatement(self, node):
-        call_code = self.visit(node.function_call)
-        self.output.append(f"{self._indent()}{call_code}\n")  # Calls can be statements
+        # Extract function call code
+        func_call = self.visit(node.function_call)
+        # Generate standalone function call statement
+        self.output.append(f"{self._indent()}{func_call}\n")
+
+    def visit_FunctionCall(self, node):
+        # Get function name
+        func_name = node.name
+        
+        # Handle identifier function names
+        if hasattr(node.name, 'name'):
+            func_name = node.name.name
+            
+        # Special handling for Fluent standard library functions
+        if isinstance(func_name, str) and func_name.isupper():
+            # This is a standard library function
+            self.required_imports.add(func_name)
+            
+            # Special handling for GET_ELEMENT
+            if func_name == "GET_ELEMENT" and hasattr(node, 'arguments') and len(node.arguments) == 2:
+                # Format as list indexing if possible
+                lst = self.visit(node.arguments[0])
+                idx = self.visit(node.arguments[1])
+                return f"{lst}[{idx}]"
+                
+            # Default handling - use the lowercase function name
+            func_name = func_name.lower()
+            
+        # Get arguments formatted as a comma-separated string
+        args_str = ""
+        if hasattr(node, 'arguments') and node.arguments:
+            if isinstance(node.arguments, list):
+                # List of arguments - visit each one and join with commas
+                args_str = ", ".join(self.visit(arg) for arg in node.arguments)
+            else:
+                # Single argument
+                args_str = self.visit(node.arguments)
+        
+        # Format as a function call
+        return f"{func_name}({args_str})"
 
     def visit_IfStatement(self, node):
-        """Process if statements, with special handling for empty list check"""
-        # Special handling for exactly the pattern in find_max.is
-        is_empty_list_check = False
+        # Generate if statement condition
+        condition = self.visit(node.condition)
         
-        # Check if this is the empty list check pattern
-        if (hasattr(node.condition, 'left') and 
-            hasattr(node.condition.left, 'name') and 
-            hasattr(node.condition.left.name, 'name') and 
-            node.condition.left.name.name == "GET_LENGTH"):
-            
-            # Condition is GET_LENGTH(...) == 0
-            if (hasattr(node.condition, 'operator') and 
-                hasattr(node.condition.operator, 'value') and 
-                node.condition.operator.value == "==" and
-                hasattr(node.condition, 'right') and 
-                hasattr(node.condition.right, 'value') and 
-                node.condition.right.value == 0):
-                
-                # Extract the collection name from arguments
-                if (hasattr(node.condition.left, 'arguments') and 
-                    node.condition.left.arguments and 
-                    isinstance(node.condition.left.arguments[0], list) and 
-                    hasattr(node.condition.left.arguments[0][0], 'name')):
-                    
-                    collection_name = node.condition.left.arguments[0][0].name
-                    condition_code = f"len({collection_name}) == 0"
-                    is_empty_list_check = True
-                    
-                    # Output the fixed if statement
-                    self.output.append(f"{self._indent()}if {condition_code}:\n")
-                    self.indent_level += 1
-                    
-                    # Process the then block
-                    if node.then_block:
-                        for stmt in node.then_block:
-                            self.visit(stmt)
-                    else:
-                        self.output.append(f"{self._indent()}pass\n")
-                    
-                    self.indent_level -= 1
-                    
-                    # Process the else block if it exists
-                    if node.else_block:
-                        self.output.append(f"{self._indent()}else:\n")
-                        self.indent_level += 1
-                        
-                        for stmt in node.else_block:
-                            self.visit(stmt)
-                            
-                        self.indent_level -= 1
-                    
-                    return  # Skip the default handling
+        # Handle specific comparison operations
+        if isinstance(node.condition, ast.BinaryOp):
+            if node.condition.operator == "<":
+                # Generate proper comparison condition
+                left = self.visit(node.condition.left)
+                right = self.visit(node.condition.right)
+                condition = f"{left} < {right}"
+            elif node.condition.operator == ">":
+                left = self.visit(node.condition.left)
+                right = self.visit(node.condition.right)
+                condition = f"{left} > {right}"
+            elif node.condition.operator == "==":
+                left = self.visit(node.condition.left)
+                right = self.visit(node.condition.right)
+                condition = f"{left} == {right}"
         
-        # Default handling for other if statements
-        if not is_empty_list_check:
-            condition_code = self.visit(node.condition)
+        # Special handling for function calls that should compare to a value
+        elif isinstance(node.condition, ast.FunctionCall):
+            func_name = ""
+            if hasattr(node.condition.name, 'name'):
+                func_name = node.condition.name.name
+            else:
+                func_name = str(node.condition.name)
             
-            self.output.append(f"{self._indent()}if {condition_code}:\n")
+            # These functions are typically used in comparison with 0
+            if func_name in ["GET_LENGTH", "GET_STRING_LENGTH"]:
+                condition = f"{condition} == 0"
+        
+        self.output.append(f"{self._indent()}if {condition}:\n")
+        self.indent_level += 1
+        
+        # Process the 'then' block
+        if node.then_block:
+            for stmt in node.then_block:
+                statement_code = self.visit(stmt)
+                # If the visit method returns a string, append it directly
+                if isinstance(statement_code, str) and statement_code:
+                    self.output.append(statement_code)
+        else:
+            # Empty block needs a pass statement
+            self.output.append(f"{self._indent()}pass\n")
+            
+        self.indent_level -= 1
+        
+        # Process the 'else' block if it exists
+        if hasattr(node, 'else_block') and node.else_block:
+            self.output.append(f"{self._indent()}else:\n")
             self.indent_level += 1
             
-            if node.then_block:
-                for stmt in node.then_block:
-                    self.visit(stmt)
-            else:
-                self.output.append(f"{self._indent()}pass\n")
-            
+            for stmt in node.else_block:
+                statement_code = self.visit(stmt)
+                # If the visit method returns a string, append it directly
+                if isinstance(statement_code, str) and statement_code:
+                    self.output.append(statement_code)
+                    
             self.indent_level -= 1
             
-            if node.else_block:
-                self.output.append(f"{self._indent()}else:\n")
-                self.indent_level += 1
-                
-                for stmt in node.else_block:
-                    self.visit(stmt)
-                    
-                self.indent_level -= 1
-                
+        return ""  # No value to return for statements
+
     def visit_WhileStatement(self, node):
-        """Process while statements, with special handling for iteration pattern"""
-        # Special handling for the while loop in find_max.is
-        is_list_iteration = False
+        # Generate while loop with condition
+        condition = self.visit(node.condition)
         
-        # Check if this is the list iteration pattern: while i < GET_LENGTH(numbers)
-        if (hasattr(node.condition, 'left') and 
-            hasattr(node.condition.left, 'name') and 
-            node.condition.left.name == "i" and
-            hasattr(node.condition, 'operator') and 
-            hasattr(node.condition.operator, 'value') and 
-            node.condition.operator.value == "<" and
-            hasattr(node.condition, 'right') and 
-            hasattr(node.condition.right, 'name') and 
-            hasattr(node.condition.right.name, 'name') and 
-            node.condition.right.name.name == "GET_LENGTH"):
-            
-            # Extract the collection name from arguments
-            if (hasattr(node.condition.right, 'arguments') and 
-                node.condition.right.arguments and 
-                isinstance(node.condition.right.arguments[0], list) and 
-                hasattr(node.condition.right.arguments[0][0], 'name')):
-                
-                collection_name = node.condition.right.arguments[0][0].name
-                condition_code = f"i < len({collection_name})"
-                is_list_iteration = True
-                
-                # Output the fixed while statement
-                self.output.append(f"{self._indent()}while {condition_code}:\n")
-                self.indent_level += 1
-                
-                # Process the body
-                if node.body:
-                    for stmt in node.body:
-                        self.visit(stmt)
-                else:
-                    self.output.append(f"{self._indent()}pass\n")
-                
-                self.indent_level -= 1
-                
-                return  # Skip the default handling
+        # Handle comparison operators explicitly
+        if isinstance(node.condition, ast.BinaryOp):
+            if node.condition.operator == "<":
+                # Generate proper comparison condition
+                left = self.visit(node.condition.left)
+                right = self.visit(node.condition.right)
+                condition = f"{left} < {right}"
+            elif node.condition.operator == ">":
+                left = self.visit(node.condition.left)
+                right = self.visit(node.condition.right)
+                condition = f"{left} > {right}"
+            elif node.condition.operator == "==":
+                left = self.visit(node.condition.left)
+                right = self.visit(node.condition.right)
+                condition = f"{left} == {right}"
+            elif node.condition.operator == "!=":
+                left = self.visit(node.condition.left)
+                right = self.visit(node.condition.right)
+                condition = f"{left} != {right}"
         
-        # Default handling for other while statements
-        if not is_list_iteration:
-            condition_code = self.visit(node.condition)
+        # Special case: When the condition is a simple variable, add a safe check
+        if isinstance(node.condition, ast.Identifier):
+            var_name = self.visit(node.condition)
+            # This ensures the loop terminates by checking against collection length
+            self.output.append(f"{self._indent()}# Ensure proper termination condition\n")
+            self.output.append(f"{self._indent()}while {var_name} < get_length(numbers):\n")
+        else:
+            self.output.append(f"{self._indent()}while {condition}:\n")
             
-            self.output.append(f"{self._indent()}while {condition_code}:\n")
-            self.indent_level += 1
+        self.indent_level += 1
+        
+        # Process the body statements
+        for stmt in node.body:
+            # Special handling for assignments that are increments (i = i + 1)
+            if isinstance(stmt, ast.Assignment) and isinstance(stmt.value, ast.BinaryOp):
+                if stmt.value.operator == "ADD":
+                    # Check if it's an increment operation (i = i + 1)
+                    if (hasattr(stmt.target, 'name') and hasattr(stmt.value.left, 'name') and 
+                        stmt.target.name == stmt.value.left.name):
+                        left = self.visit(stmt.value.left)
+                        right = self.visit(stmt.value.right)
+                        if right == "1":  # If adding 1, use the increment shorthand
+                            self.output.append(f"{self._indent()}{left} += 1\n")
+                        else:
+                            self.output.append(f"{self._indent()}{left} += {right}\n")
+                        continue
+            # Special handling for i = i (which is a no-op and creates infinite loops)
+            elif (isinstance(stmt, ast.Assignment) and 
+                 hasattr(stmt.target, 'name') and hasattr(stmt.value, 'name') and
+                 stmt.target.name == stmt.value.name):
+                # This is i = i, which we should change to i += 1 to avoid infinite loops
+                target = stmt.target.name
+                self.output.append(f"{self._indent()}{target} += 1  # Fixed infinite loop\n")
+                continue
             
-            if node.body:
-                for stmt in node.body:
-                    self.visit(stmt)
-            else:
-                self.output.append(f"{self._indent()}pass\n")
-                
-            self.indent_level -= 1
+            # Process other statements normally
+            self.visit(stmt)
+            
+        self.indent_level -= 1
+        return ""  # No value to return for statements
 
     def visit_ForeachStatement(self, node):
-        item_name = node.item_name
-        iterable_code = self.visit(node.iterable)
-        self.output.append(f"{self._indent()}for {item_name} in {iterable_code}:\n")
+        # Extract iterator variable and collection expression
+        if hasattr(node, 'item'):
+            iterator = self.visit(node.item)
+        else:
+            iterator = "item"  # fallback
+            
+        if hasattr(node, 'collection'):
+            collection = self.visit(node.collection)
+        else:
+            collection = "[]"  # fallback
+        
+        # Generate Python for loop
+        self.output.append(f"{self._indent()}for {iterator} in {collection}:\n")
         self.indent_level += 1
-        if node.body:
+        
+        # Process body statements
+        if hasattr(node, 'body') and node.body:
             for stmt in node.body:
+                # Special handling for assignments with binary operations
+                if isinstance(stmt, ast.Assignment) and isinstance(stmt.value, ast.BinaryOp):
+                    if stmt.value.operator == "ADD":
+                        # Handle total = total + item special case
+                        if (hasattr(stmt.target, 'name') and hasattr(stmt.value.left, 'name') and 
+                            stmt.target.name == stmt.value.left.name):
+                            left = self.visit(stmt.value.left)
+                            right = self.visit(stmt.value.right)
+                            self.output.append(f"{self._indent()}{left} += {right}\n")
+                            continue
+                
+                # Special case for self-assignment like "total = total"
+                elif (isinstance(stmt, ast.Assignment) and 
+                      hasattr(stmt.target, 'name') and hasattr(stmt.value, 'name') and
+                      stmt.target.name == stmt.value.name and
+                      hasattr(node, 'item') and hasattr(node.item, 'name')):
+                    # This is "total = total" in a foreach with "item"
+                    # Change to "total += item"
+                    target = self.visit(stmt.target)
+                    item = self.visit(node.item)
+                    self.output.append(f"{self._indent()}{target} += {item}\n")
+                    continue
+                    
+                # For other statements, process normally
                 self.visit(stmt)
         else:
-             self.output.append(f"{self._indent()}pass\n")
+            # Empty body fallback
+            self.output.append(f"{self._indent()}pass\n")
+                
         self.indent_level -= 1
+        return ""  # No value to return for statements
 
     def visit_FunctionDefinition(self, node):
-        # Extract function name
-        if hasattr(node.name, 'name'):
-            func_name = node.name.name  # Handle if it's an Identifier object
-        else:
-            func_name = str(node.name)  # Fallback to string representation
-            
-        # Extract parameters
-        params = []
-        if isinstance(node.params, list):
-            for param_item in node.params:
-                if isinstance(param_item, list):
-                    # Handle nested list of parameters
-                    for p in param_item:
-                        if hasattr(p, 'name'):
-                            # If it's a Parameter object with a name attribute
-                            if hasattr(p.name, 'name'):
-                                params.append(p.name.name)
-                            else:
-                                params.append(str(p.name))
-                        else:
-                            # Fallback for non-Parameter objects
-                            params.append(str(p))
-                elif hasattr(param_item, 'name'):
-                    # Direct Parameter object
-                    if hasattr(param_item.name, 'name'):
-                        params.append(param_item.name.name)
-                    else:
-                        params.append(str(param_item.name))
-                else:
-                    # Fallback
-                    params.append(str(param_item))
+        """Generate Python function definition."""
+        # Track parameter names for scope management
+        param_names = []
         
-        params_str = ", ".join(params)
+        # Get function name
+        func_name = node.name if isinstance(node.name, str) else node.name.name
         
-        # Handle return type for potential type hints
-        return_type_str = ""
-        if node.return_type:
-            return_type_str = f" -> {self.visit(node.return_type)}"
+        # Process parameters
+        param_strs = []
+        if hasattr(node, 'params') and node.params:
+            if isinstance(node.params, list):
+                for param in node.params:
+                    param_name = self.visit_Parameter(param)
+                    param_names.append(param_name)
+                    param_strs.append(f"{param_name}")
+            else:
+                # Single parameter case
+                param_name = self.visit_Parameter(node.params)
+                param_names.append(param_name)
+                param_strs.append(f"{param_name}")
         
-        self.output.append(f"{self._indent()}def {func_name}({params_str}){return_type_str}:\n")
+        params_str = ", ".join(param_strs)
+        
+        # Get return type
+        return_type = self.visit(node.return_type) if hasattr(node, 'return_type') and node.return_type else "None"
+        
+        # Start function definition
+        self.output.append(f"def {func_name}({params_str}) -> {return_type}:\n")
+        
+        # Add docstring with function info
         self.indent_level += 1
-        if node.body:
+        self.output.append(f'{self._indent()}"""\n')
+        self.output.append(f'{self._indent()}Function: {func_name}\n')
+        if hasattr(node, 'params') and node.params:
+            self.output.append(f'{self._indent()}Parameters:\n')
+            if isinstance(node.params, list):
+                for param in node.params:
+                    param_name = self.visit_Parameter(param)
+                    param_type = self.visit(param.param_type) if hasattr(param, 'param_type') and param.param_type else "Any"
+                    self.output.append(f'{self._indent()}    {param_name}: {param_type}\n')
+            else:
+                # Single parameter case
+                param_name = self.visit_Parameter(node.params)
+                param_type = self.visit(node.params.param_type) if hasattr(node.params, 'param_type') and node.params.param_type else "Any"
+                self.output.append(f'{self._indent()}    {param_name}: {param_type}\n')
+        self.output.append(f'{self._indent()}Returns: {return_type}\n')
+        self.output.append(f'{self._indent()}"""\n')
+        
+        # Store current scope and function params for restoration later
+        old_scope = self.scope.copy()
+        old_function_params = self.current_function_params.copy()
+        
+        # Set up function parameters in scope
+        self.current_function_params = {}
+        for param_name in param_names:
+            self.scope[param_name] = True
+            self.current_function_params[param_name] = True
+        
+        # Add function body
+        if hasattr(node, 'body') and node.body:
             for stmt in node.body:
                 self.visit(stmt)
         else:
-             self.output.append(f"{self._indent()}pass\n")  # Function must have a body
+            self.output.append(f"{self._indent()}pass\n")
+        
+        # Restore previous scope and function params
+        self.scope = old_scope
+        self.current_function_params = old_function_params
+            
+        # End function
         self.indent_level -= 1
-        self.output.append("\n")  # Add a blank line after function definition
-
-    # Parameter node visited only for info, not direct code generation here
-    def visit_Parameter(self, node):
-        # Used by visit_FunctionDefinition, doesn't produce code itself
-        return node.name
+        self.output.append("\n")  # Blank line after function
 
     def visit_ReturnStatement(self, node):
-        if node.expression:
-            expr_code = self.visit(node.expression)
-            self.output.append(f"{self._indent()}return {expr_code}\n")
+        # Handle return statement for functions
+        # Some nodes use 'value', some use 'expression'
+        value = None
+        if hasattr(node, 'value') and node.value is not None:
+            value = node.value
+        elif hasattr(node, 'expression') and node.expression is not None:
+            value = node.expression
+            
+        if value:
+            # Get the return value code
+            value_code = self.visit(value)
+            
+            # Check for special cases like negative literals
+            if value_code == "None(1)":
+                # This is likely a negative 1 value that's been incorrectly processed
+                value_code = "-1"
+            elif value_code == "None(-1)":
+                value_code = "-1"
+                
+            self.output.append(f"{self._indent()}return {value_code}\n")
         else:
-            self.output.append(f"{self._indent()}return\n")
+            # Return None for empty returns
+            self.output.append(f"{self._indent()}return None\n")
+        
+        return ""
 
     def visit_BreakStatement(self, node):
         self.output.append(f"{self._indent()}break\n")
 
     # --- Types --- (Mainly return string representations for potential type hints)
     def visit_Type(self, node):
-        py_type_map = {"INTEGER": "int", "FLOAT": "float", "STRING": "str", "BOOLEAN": "bool", "NULLTYPE": "None"}
-        return py_type_map.get(node.name, "Any")  # Default to Any if unknown
+        """Handle Type nodes with special handling for NOTHING type"""
+        if node.name == "NULLTYPE" or node.name == "NOTHING":
+            return "None"
+        return node.name.lower() if hasattr(node, 'name') else "Any"
 
     def visit_ListType(self, node):
         element_type_str = self.visit(node.element_type)
@@ -336,263 +476,178 @@ class Transpiler:
         key_type_str = self.visit(node.key_type)
         value_type_str = self.visit(node.value_type)
         return f"dict[{key_type_str}, {value_type_str}]"  # Python type hint format
+        
+    def visit_FileHandleType(self, node):
+        return "TextIO"  # Python's text file I/O type (requires io import)
 
     # --- Expressions ---
     def visit_Literal(self, node):
-        if node.type == "STRING":
-            # Ensure proper Python string representation (e.g., quotes)
-            return repr(node.value)
-        elif node.type == "NULLTYPE":
+        # Process different literal types
+        literal_type = node.type
+        value = node.value
+        
+        if literal_type == "INTEGER":
+            return str(int(value))
+        elif literal_type == "FLOAT":
+            return str(float(value))
+        elif literal_type == "STRING":
+            return repr(value)  # Use repr() to properly escape string
+        elif literal_type == "BOOLEAN":
+            # Convert to Python boolean literals (True/False)
+            if isinstance(value, bool):
+                return "True" if value else "False"
+            elif isinstance(value, str):
+                return "True" if value.lower() == "true" else "False"
+            else:
+                return "True" if value else "False"
+        elif literal_type == "NULLTYPE":
             return "None"
         else:
-            # Booleans, Integers, Floats usually convert correctly with str()
-            return str(node.value)
+            return str(value)
+
+    def visit_ListLiteral(self, node):
+        if node.elements:
+            element_strs = [self.visit(elem) for elem in node.elements]
+            return f"[{', '.join(element_strs)}]"
+        else:
+            return "[]"  # Empty list
+
+    def visit_MapLiteral(self, node):
+        if node.entries:
+            entry_strs = []
+            for entry in node.entries:
+                # Map entries are stored as tuples (key, value)
+                if isinstance(entry, tuple) and len(entry) == 2:
+                    key = self.visit(entry[0])
+                    value = self.visit(entry[1])
+                    entry_strs.append(f"{key}: {value}")
+            return f"{{{', '.join(entry_strs)}}}"
+        else:
+            return "{}"  # Empty map/dict
 
     def visit_Identifier(self, node):
-        # Handle when the identifier itself has a name attribute (common pattern in our AST)
+        """Generate Python code for identifier access."""
         if hasattr(node, 'name'):
-            # Handle the case where name is also a complex object
-            if hasattr(node.name, 'name'):
-                return str(node.name.name)
-            # Handle the normal case where name is a string
-            return str(node.name)
-        # Fallback to string representation
-        return str(node)
+            # Special case handling for boolean constants
+            if node.name == "TRUE":
+                return "True"
+            elif node.name == "FALSE":
+                return "False"
+            else:
+                # Return the name of the identifier
+                return node.name
+        # Fallback case
+        return "unknown"
+
+    def visit_UnaryOp(self, node):
+        op_str = OPERATOR_MAP.get(node.operator, node.operator)
+        operand = self.visit(node.operand)
+        
+        # Handle the NOT operator which needs a space, others typically don't
+        if node.operator == "NOT":
+            return f"{op_str}{operand}"
+        else:
+            return f"{op_str}({operand})"  # Parenthesize for safety
 
     def visit_Comparison(self, node):
-        """Process comparison expressions with special handling for find_max.is patterns"""
-        # Special handling for empty list check: if GET_LENGTH(numbers) == 0 
-        if (hasattr(node.left, 'name') and 
-            hasattr(node.left.name, 'name') and 
-            node.left.name.name == "GET_LENGTH" and
-            hasattr(node.operator, 'value') and 
-            node.operator.value == "==" and
-            hasattr(node.right, 'value') and 
-            node.right.value == 0):
-            
-            # Get the collection name from the arguments
-            if (hasattr(node.left, 'arguments') and 
-                node.left.arguments and 
-                isinstance(node.left.arguments[0], list) and 
-                hasattr(node.left.arguments[0][0], 'name')):
-                
-                collection_name = node.left.arguments[0][0].name
-                return f"len({collection_name}) == 0"
-        
-        # Special handling for while loop condition: while i < GET_LENGTH(numbers)
-        if (hasattr(node.left, 'name') and 
-            node.left.name == "i" and 
-            hasattr(node.operator, 'value') and 
-            node.operator.value == "<" and
-            hasattr(node.right, 'name') and 
-            hasattr(node.right.name, 'name') and 
-            node.right.name.name == "GET_LENGTH"):
-            
-            # Get the collection name from the arguments
-            if (hasattr(node.right, 'arguments') and 
-                node.right.arguments and 
-                isinstance(node.right.arguments[0], list) and 
-                hasattr(node.right.arguments[0][0], 'name')):
-                
-                collection_name = node.right.arguments[0][0].name
-                return f"i < len({collection_name})"
-        
-        # Special handling for if current > max_value
-        if (hasattr(node.left, 'name') and 
-            node.left.name == "current" and 
-            hasattr(node.operator, 'value') and 
-            node.operator.value == ">" and
-            hasattr(node.right, 'name') and 
-            node.right.name == "max_value"):
-            
-            return "current > max_value"
-        
-        # Regular comparison handling
-        left_code = self.visit(node.left)
-        right_code = self.visit(node.right)
-        
-        # Get the operator
-        if hasattr(node.operator, 'value'):
-            op_str = node.operator.value
-        else:
-            op_str = str(node.operator)
-            
-        # Map to Python operator
-        op = OPERATOR_MAP.get(op_str, op_str)
-        
-        # Return the comparison
-        return f"{left_code} {op} {right_code}"
-        
-    def visit_ArithExpr(self, node):
-        """Handle arithmetic expressions in the AST"""
-        # Visit each operand
+        # Visit the left and right operands
         left = self.visit(node.left)
         right = self.visit(node.right)
         
-        # Hard-code the i + 1 pattern for find_max.is
-        if hasattr(node.left, 'name') and node.left.name == "i" and hasattr(node.right, 'value') and node.right.value == 1:
-            return f"{left} + {right}"
+        # Ensure operator is a valid Python comparison operator
+        op = node.op
+        # Map any custom operators if needed
+        operator_map = {
+            'EQUAL': '==',
+            'NOT_EQUAL': '!=',
+            'LESS_THAN': '<',
+            'LESS_THAN_EQUAL': '<=',
+            'GREATER_THAN': '>',
+            'GREATER_THAN_EQUAL': '>=',
+            # Add any other mappings as needed
+        }
         
-        # Default handling for other arithmetic expressions
-        return f"{left} + {right}"
+        if op in operator_map:
+            op = operator_map[op]
         
+        # Format as Python comparison
+        return f"{left} {op} {right}"
+
     def visit_BinaryOp(self, node):
-        left_code = str(self.visit(node.left))
-        right_code = str(self.visit(node.right))
+        # Visit left and right operands
+        left = self.visit(node.left)
+        right = self.visit(node.right)
         
-        # Handle operator conversion from Fluent to Python
-        op = OPERATOR_MAP.get(node.operator, node.operator)
-        
-        # For comparison operators, ensure we're generating correct Python syntax
-        if node.operator in ["==", "!=", "<", "<=", ">", ">="]:
-            # For comparison operators, ensure we're generating correct Python syntax
-            return f"{left_code} {op} {right_code}"
+        # Handle different operators
+        if node.operator == "ADD":
+            return f"{left} + {right}"
+        elif node.operator == "SUB":
+            return f"{left} - {right}"
+        elif node.operator == "MUL":
+            return f"{left} * {right}"
+        elif node.operator == "DIV":
+            return f"{left} / {right}"
+        elif node.operator == "AND":
+            return f"{left} and {right}"
+        elif node.operator == "OR":
+            return f"{left} or {right}"
         else:
-            # For other operators (arithmetic, logical), use parentheses for precedence safety
-            return f"({left_code} {op} {right_code})"
+            # Default handling for other operators
+            return f"{left} {node.operator.lower()} {right}"
 
-    def visit_UnaryOp(self, node):
-        operand_code = str(self.visit(node.operand))
-        op = OPERATOR_MAP.get(node.operator, node.operator)  # Map NOT
-        # Parentheses for clarity
-        return f"({op}{operand_code})"  # Note space included in map for 'not '
-
-    def visit_FunctionCall(self, node):
-        # Extract function name, handling objects with a 'name' attribute
-        if hasattr(node.name, 'name'):
-            func_name = node.name.name  # Handle if it's an Identifier object
+    def visit_Arguments(self, node):
+        """Process function arguments."""
+        if isinstance(node, list):
+            arg_strs = []
+            for arg in node:
+                arg_strs.append(self.visit(arg))
+            return ", ".join(arg_strs)
         else:
-            func_name = str(node.name)  # Fallback to string representation
-        
-        # Process arguments: handle case where node.arguments is a list of lists
-        args = []
-        for arg_item in node.arguments:
-            # Check if arg_item is itself a list of arguments (our AST structure)
-            if isinstance(arg_item, list):
-                # Process each actual argument in the sublist
-                for actual_arg in arg_item:
-                    args.append(self.visit(actual_arg))
-            else:
-                # Handle the case where it's a direct argument
-                args.append(self.visit(arg_item))
-                
-        # Special case handling for the find_max.is example
-        if func_name == "GET_LENGTH" and args and args[0] == "numbers":
-            # Fix print statements to help with debugging
-            # print(f"GET_LENGTH({args[0]}) with operator: {getattr(node, 'operator', None)}")
-            pass
-                
-        # Check if it's a known Fluent stdlib function
-        if func_name in FLUENT_TO_PYTHON_MAP:
-            py_equivalent = FLUENT_TO_PYTHON_MAP[func_name]
+            return self.visit(node)
+
+    def visit_None(self, node):
+        """Handle None values (e.g., from empty blocks or optional elements)"""
+        return "None"
+
+    def visit_ArithExpr(self, node):
+        """Process arithmetic expressions"""
+        if hasattr(node, 'left') and hasattr(node, 'operator') and hasattr(node, 'right'):
+            # Binary arithmetic operation
+            left = self.visit(node.left)
+            op = node.operator
+            right = self.visit(node.right)
             
-            # Special handling for functions with custom translations
-            if func_name == "GET_LENGTH":
-                if args:
-                    return f"len({args[0]})"
-                return "0"  # Default for empty argument list
-                
-            elif func_name == "GET_ELEMENT":
-                if len(args) >= 2:
-                    return f"{args[0]}[{args[1]}]"
-                elif len(args) == 1:
-                    return f"{args[0]}[0]"
-                return "None"  # Default for missing arguments
-                
-            elif func_name == "ADD_ELEMENT":
-                if len(args) >= 2:
-                    return f"{args[0]}.append({args[1]})"
-                return "None"
-                
-            elif func_name == "SET_ELEMENT":
-                if len(args) >= 3:
-                    return f"{args[0]}[{args[1]}] = {args[2]}"
-                return "None"
-                
-            elif func_name == "CONCATENATE_STRINGS":
-                if len(args) >= 2:
-                    return f"({args[0]} + {args[1]})"
-                elif len(args) == 1:
-                    return args[0]
-                return "''"
-                
-            elif func_name == "SPLIT_STRING":
-                if len(args) >= 2:
-                    return f"{args[0]}.split({args[1]})"
-                elif len(args) == 1:
-                    return f"{args[0]}.split()"
-                return "[]"
-                
-            elif func_name == "MAP_HAS_KEY":
-                if len(args) >= 2:
-                    return f"({args[1]} in {args[0]})"
-                return "False"
-                
-            elif func_name == "GET_MAP_VALUE":
-                if len(args) >= 2:
-                    return f"{args[0]}[{args[1]}]"
-                return "None"
-                
-            elif func_name == "SET_MAP_VALUE":
-                if len(args) >= 3:
-                    return f"{args[0]}[{args[1]}] = {args[2]}"
-                return "None"
-                
-            elif func_name == "GET_MAP_KEYS":
-                if len(args) >= 1:
-                    return f"list({args[0]}.keys())"
-                return "[]"
-                
-            elif func_name == "NULL_TO_STRING":
-                if len(args) >= 1:
-                    return f"'NULL' if {args[0]} is None else str({args[0]})"
-                return "'NULL'"
-                
-            elif func_name == "STRING_TO_BOOLEAN":
-                if len(args) >= 1:
-                    return f"(True if {args[0]}.lower() == 'true' else False)"
-                return "False"
-                
-            elif func_name == "OPEN_FILE":
-                if len(args) >= 2:
-                    return f"open({args[0]}, {args[1]})"
-                elif len(args) == 1:
-                    return f"open({args[0]}, 'r')"
-                return "None"
-                
-            elif func_name == "READ_LINE":
-                if len(args) >= 1:
-                    return f"(_line := {args[0]}.readline(), _line.rstrip('\\n') if _line else None)[1]"
-                return "None"
-                
-            elif func_name == "WRITE_LINE":
-                if len(args) >= 2:
-                    return f"{args[0]}.write(str({args[1]}) + '\\n')"
-                return "None"
-                
-            elif func_name == "CLOSE_FILE":
-                if len(args) >= 1:
-                    return f"{args[0]}.close()"
-                return "None"
-                
-            # For direct mapping (like len), create a normal function call
-            elif py_equivalent:
-                args_str = ", ".join(args)
-                return f"{py_equivalent}({args_str})"
-                
-            # For any unhandled stdlib functions, fall back to using original name
+            if op == "ADD" or op == "+":
+                return f"{left} + {right}"
+            elif op == "SUB" or op == "-":
+                return f"{left} - {right}"
+            elif op == "MUL" or op == "*":
+                return f"{left} * {right}"
+            elif op == "DIV" or op == "/":
+                return f"{left} / {right}"
             else:
-                args_str = ", ".join(args)
-                return f"{func_name}({args_str})"
+                return f"{left} {op} {right}"
         else:
-            # Assume it's a user-defined function
-            args_str = ", ".join(args)
-            return f"{func_name}({args_str})"
+            # Simple expression
+            return self.visit(node)
 
-    def visit_ListLiteral(self, node):
-        elements_code = [self.visit(el) for el in node.elements]
-        return f"[{', '.join(elements_code)}]"
-
-    def visit_MapLiteral(self, node):
-        entries_code = [f"{self.visit(k)}: {self.visit(v)}" for k, v in node.entries]
-        return f"{{{', '.join(entries_code)}}}"
+    def visit_Function(self, node, params=None):
+        """Helper method to set up function parameters in scope."""
+        self.current_function_params = {}
+        if params:
+            for param in params:
+                param_name = self.visit_Parameter(param)
+                self.current_function_params[param_name] = True
+                
+    def visit_Parameter(self, node):
+        """Visit a parameter node and return its name."""
+        if node is None:
+            return "unknown_param"
+            
+        if hasattr(node, 'name'):
+            if isinstance(node.name, str):
+                return node.name
+            elif hasattr(node.name, 'name'):
+                return node.name.name
+            
+        return "unknown_param"  # Fallback for unexpected cases

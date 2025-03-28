@@ -1,83 +1,111 @@
 // File: fluent_grammar.lark
-// Grammar definition for the Fluent language
+// Grammar definition for the Fluent language (Simplified for bubble sort example)
 
 ?start: statement*
 
 // Statements
-?statement: variable_declaration | assignment | print_statement | function_call_statement
-          | if_statement | while_statement | foreach_statement
-          | function_definition | return_statement | break_statement 
+?statement: variable_declaration
+          | assignment
+          | if_statement
+          | while_statement
+          | function_call_statement
+          | print_statement
+          | return_statement
+          | function_definition
           | COMMENT -> ignored_statement
 
-variable_declaration: "VAR" IDENTIFIER "AS" type ["=" expression] _TERMINATOR
-assignment: IDENTIFIER "=" expression _TERMINATOR
-print_statement: "PRINT" expression _TERMINATOR
-function_call_statement: function_call _TERMINATOR
-return_statement: "RETURN" [expression] _TERMINATOR
-break_statement: "BREAK" _TERMINATOR
+// Variable declaration with optional initializer
+variable_declaration: IDENTIFIER ":" type ["=" expression] ";"?
+                   | "VAR" IDENTIFIER "AS" type ["=" expression] ";"?
 
-// Control Flow
-if_statement: "IF" expression "THEN" _TERMINATOR statement* ["ELSE" _TERMINATOR statement*] "ENDIF" _TERMINATOR?
-while_statement: "WHILE" expression _TERMINATOR statement* "ENDWHILE" _TERMINATOR?
-foreach_statement: "FOREACH" IDENTIFIER "IN" expression _TERMINATOR statement* "ENDFOREACH" _TERMINATOR?
+// Assignment statement
+assignment: IDENTIFIER "=" expression ";"?
 
-// Function Definition
-function_definition: "FUNCTION" IDENTIFIER "(" [parameters] ")" ["RETURNS" type] _TERMINATOR statement* "ENDFUNCTION" _TERMINATOR?
-parameters: parameter ("," parameter)*
-parameter: "PARAM" IDENTIFIER "AS" type
+// Function call as statement
+function_call_statement: function_call ";"?
+
+// Print statement
+print_statement: "PRINT" "(" expression ")" ";"?
+
+// Return statement
+return_statement: "RETURN" [expression] ";"?
+
+// If statement
+if_statement: "IF" expression "THEN" statement* "END" ";"?
+
+// While statement
+while_statement: "WHILE" expression "DO" statement* "END" ";"?
+
+// Function definition
+function_definition: "FUNCTION" IDENTIFIER parameters [":" type] statement* "END" ";"?
+
+// Parameters
+parameters: "(" [parameter_list] ")"
+parameter_list: parameter ("," parameter)*
+parameter: IDENTIFIER ":" type
 
 // Types
-?type: basetype | list_type | map_type
-basetype: "INTEGER" | "FLOAT" | "STRING" | "BOOLEAN" | "NULLTYPE"
-list_type: "LIST" "<" type ">"
-map_type: "MAP" "<" type "," type ">"
+?type: basetype | list_type
 
-// --- Expressions with explicit precedence ---
-?expression: logical_or
+basetype: "INTEGER" | "FLOAT" | "STRING" | "BOOLEAN" | "NOTHING"
+list_type: "LIST" "<" basetype ">"
 
-?logical_or: logical_and ("OR" logical_and)*       // Lowest precedence
-?logical_and: comparison ("AND" comparison)*
-?comparison: arith_expr [comp_op arith_expr]
-comp_op: "==" | "!=" | "<" | "<=" | ">" | ">="
-?arith_expr: term (("+" | "-") term)*
-?term: factor (("*" | "/") factor)*             
-?factor: unary_op factor | atom       // Unary operators bind tightest
-unary_op: "+" | "-" | "NOT"
+// Expressions
+?expression: comparison
+          | arith_expr
+          | function_call
+          | list_literal
+          | IDENTIFIER
+          | literal
 
-?atom: NUMBER | FLOAT_NUMBER | STRING_LITERAL | BOOLEAN_LITERAL | NULL_LITERAL
+// Comparison expressions
+comparison: expression comp_op expression
+comp_op: "==" -> eq
+       | "!=" -> neq
+       | "<" -> lt
+       | ">" -> gt
+       | "<=" -> lte
+       | ">=" -> gte
+
+// Arithmetic expressions
+?arith_expr: term
+          | arith_expr "+" term -> add
+          | arith_expr "-" term -> sub
+
+?term: factor
+     | term "*" factor -> mul
+     | term "/" factor -> div
+
+?factor: atom
+       | "+" factor -> pos
+       | "-" factor -> neg
+
+?atom: "(" expression ")"
      | IDENTIFIER
-     | list_literal | map_literal 
+     | literal
      | function_call
-     | "(" expression ")"
+     | list_literal
 
-// Literals
-NUMBER: SIGNED_INT
-FLOAT_NUMBER: SIGNED_FLOAT
-STRING_LITERAL: ESCAPED_STRING
-BOOLEAN_LITERAL: "TRUE" | "FALSE"
-NULL_LITERAL: "NULL"
-
-// List/Map Literals
-list_literal: "[" [expression ("," expression)*] "]"
-map_literal: "{" [map_entry ("," map_entry)*] "}"
-map_entry: expression ":" expression
-
-// Function Calls
-function_call: "CALL" IDENTIFIER "(" [arguments] ")"
+// Function call
+function_call: NAME "(" [arguments] ")"
 arguments: expression ("," expression)*
 
+// Literals
+?literal: INTEGER
+        | STRING
+        | BOOLEAN
+
+list_literal: "[" [expression ("," expression)*] "]"
+
 // Terminals
-IDENTIFIER: CNAME
+NAME: /[a-zA-Z_][a-zA-Z0-9_]*/
+IDENTIFIER: /[a-zA-Z_][a-zA-Z0-9_]*/
+INTEGER: /-?\d+/
+STRING: /"[^"]*"/
+BOOLEAN: "TRUE" | "FALSE"
 COMMENT: "//" /[^\n]*/
-_TERMINATOR: ";" | _NL 
 
-%import common.SIGNED_INT
-%import common.SIGNED_FLOAT
-%import common.ESCAPED_STRING
-%import common.CNAME
-%import common.WS_INLINE
-%import common.NEWLINE -> _NL
-
-%ignore WS_INLINE
+// Ignore whitespace and comments
+%import common.WS
+%ignore WS
 %ignore COMMENT
-%ignore _NL+ // Ignore blank lines between statements
