@@ -10,80 +10,81 @@ from transpiler import Transpiler, TranspilerError
 
 def main(filepath):
     """Loads, parses, and transpiles a .is file."""
-
+    print(f"Parsing Fluent code from: {filepath}")
+    print("-" * 30)
+    
     try:
-        # Load the grammar
-        with open("fluent_grammar.lark", "r") as f:
-            fluent_parser = Lark(f.read(), start='start', parser='lalr') # LALR is generally efficient
-
-        # Load the Fluent source code
-        with open(filepath, "r") as f:
+        # Read input file
+        with open(filepath, 'r') as f:
             fluent_code = f.read()
-
-        print("-" * 30)
-        print(f"Parsing Fluent code from: {filepath}")
-        print("-" * 30)
-
-        # Parse
-        try:
-            parse_tree = fluent_parser.parse(fluent_code)
-            # Debug: Print parse tree
-            print("\n--- Lark Parse Tree ---")
-            print(parse_tree.pretty())
-        except LarkError as e:
-            print(f"!!! Parsing Error !!!\n{e}")
-            return
-
+            
+        # Parse with Lark grammar
+        with open("fluent_grammar.lark", 'r') as f:
+            grammar = f.read()
+        parser = Lark(grammar, start='start')
+        parse_tree = parser.parse(fluent_code)
+        
+        # Display parse tree for debugging
+        print("\n--- Lark Parse Tree ---")
+        print(parse_tree.pretty())
+        
         # Transform to AST
         print("\n--- Transforming to AST ---")
         transformer = ASTTransformer()
         ast_root = transformer.transform(parse_tree)
-        # print(ast_root) # Might need better repr for nodes
-
+        
         # Transpile to Python
         print("\n--- Transpiling to Python ---")
         transpiler = Transpiler()
-        try:
-            python_code = transpiler.transpile(ast_root)
+        python_code = transpiler.transpile(ast_root)
+        
+        # Write the generated code to a temp file
+        import os
+        output_file = os.path.join(os.path.dirname(filepath), "temp_output.py")
+        with open(output_file, 'w') as f:
+            f.write(python_code)
             
-            # Special handling for find_max.is example
-            if "find_max.is" in filepath:
-                # Manually fix known issues in the transpiled code
-                python_code = fix_find_max_code(python_code)
-                
-            print("\n--- Generated Python Code ---")
-            print(python_code)
-            print("-" * 30)
-
-            # Execute the generated Python code
-            print("\n--- Executing Python Code ---")
-            exec(python_code)
-            print("-" * 30)
-        except TranspilerError as e:
-            print(f"!!! Transpiler Error !!!\n{e}")
-        except Exception as e:
-            print(f"!!! Unexpected Transpiling Error !!!\n{type(e).__name__}: {e}")
-    
-    except FileNotFoundError as e:
-        print(f"Error: File not found - {e}")
+        print("\n--- Generated Python Code ---")
+        print(python_code)
+        
+        # Execute the Python code
+        print("\n--- Executing Python Code ---")
+        
+        # Setup the execution environment
+        # Add the backend directory to Python's path so it can find the stdlib module
+        backend_dir = os.path.dirname(os.path.abspath(__file__))
+        if backend_dir not in sys.path:
+            sys.path.append(backend_dir)
+        
+        # Execute in a subprocess to isolate environment
+        import subprocess
+        try:
+            # Add a 5-second timeout to prevent hanging on infinite loops
+            result = subprocess.run([sys.executable, output_file], 
+                                    capture_output=True, 
+                                    text=True, 
+                                    cwd=backend_dir,
+                                    timeout=5)  # 5 second timeout
+            
+            # Print output or errors
+            if result.returncode == 0:
+                print(result.stdout)
+            else:
+                print("!!! Execution Error !!!")
+                print(result.stderr)
+        except subprocess.TimeoutExpired:
+            print("!!! Execution Timeout !!!")
+            print("The program took too long to execute (possible infinite loop)")
+            # Optionally add code to kill the process here if needed
+        
+    except LarkError as e:
+        print(f"\nParsing error: {e}")
+    except TranspilerError as e:
+        print(f"\n!!! Transpiler Error !!!\n{e}")
     except Exception as e:
-        print(f"An unexpected error occurred: {e}")
-
-def fix_find_max_code(code):
-    """Apply specific fixes for the find_max.is example"""
-    # Fix the if condition for checking empty list
-    code = code.replace("if len(numbers):", "if len(numbers) == 0:")
-    
-    # Fix the while loop condition
-    code = code.replace("while i:", "while i < len(numbers):")
-    
-    # Fix the increment operation
-    code = code.replace("i = i", "i = i + 1")
-    
-    # Fix comparison in the if statement
-    code = code.replace("if current:", "if current > max_value:")
-    
-    return code
+        print(f"\n!!! Unexpected Transpiling Error !!!\n{e}")
+        import traceback
+        traceback.print_exc()
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
