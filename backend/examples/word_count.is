@@ -1,0 +1,41 @@
+// File: examples/word_count.is
+// Count occurrences of each word in a string
+
+FUNCTION count_words(PARAM text AS STRING) RETURNS MAP<STRING, INTEGER>;
+  // Create an empty map to store word counts
+  VAR word_counts AS MAP<STRING, INTEGER> = {};
+  
+  // Split the text into words
+  VAR words AS LIST<STRING> = CALL SPLIT_STRING(text, " ");
+  
+  // Count occurrences of each word
+  FOREACH word IN words
+    // Check if word is already in the map
+    IF CALL MAP_HAS_KEY(word_counts, word) THEN
+      // Increment count
+      VAR current_count AS INTEGER = CALL GET_MAP_VALUE(word_counts, word);
+      CALL SET_MAP_VALUE(word_counts, word, current_count + 1);
+    ELSE
+      // Add word to map with count 1
+      CALL SET_MAP_VALUE(word_counts, word, 1);
+    ENDIF;
+  ENDFOREACH;
+  
+  RETURN word_counts;
+ENDFUNCTION;
+
+// Sample text
+VAR sample_text AS STRING = "the quick brown fox jumps over the lazy dog the quick fox";
+
+// Count words
+VAR counts AS MAP<STRING, INTEGER> = CALL count_words(sample_text);
+
+// Print all word counts
+VAR keys AS LIST<STRING> = CALL GET_MAP_KEYS(counts);
+
+FOREACH key IN keys
+  VAR count AS INTEGER = CALL GET_MAP_VALUE(counts, key);
+  VAR output AS STRING = CALL CONCATENATE_STRINGS(key, ": ");
+  output = CALL CONCATENATE_STRINGS(output, CALL CONVERT_INTEGER_TO_STRING(count));
+  PRINT output;
+ENDFOREACH;

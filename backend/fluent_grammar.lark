@@ -1,0 +1,86 @@
+// File: fluent_grammar.lark
+// Grammar for the Fluent language (.is), designed for LLM-friendliness
+
+?start: statement*
+
+// Statements
+?statement: variable_declaration | assignment | print_statement | function_call_statement
+          | if_statement | while_statement | foreach_statement
+          | function_definition | return_statement | break_statement
+          | COMMENT -> ignored_statement // Allow comments as standalone lines
+
+variable_declaration: "VAR" IDENTIFIER "AS" type ["=" expression] _TERMINATOR
+assignment: IDENTIFIER "=" expression _TERMINATOR
+print_statement: "PRINT" expression _TERMINATOR
+function_call_statement: function_call _TERMINATOR // Allow calls as statements
+return_statement: "RETURN" [expression] _TERMINATOR
+break_statement: "BREAK" _TERMINATOR // For loops
+
+// Control Flow
+if_statement: "IF" expression "THEN" _TERMINATOR statement* ["ELSE" _TERMINATOR statement*] "ENDIF" _TERMINATOR?
+while_statement: "WHILE" expression _TERMINATOR statement* "ENDWHILE" _TERMINATOR?
+foreach_statement: "FOREACH" IDENTIFIER "IN" expression _TERMINATOR statement* "ENDFOREACH" _TERMINATOR?
+
+// Function Definition
+function_definition: "FUNCTION" IDENTIFIER "(" [parameters] ")" "RETURNS" type _TERMINATOR statement* "ENDFUNCTION" _TERMINATOR?
+parameters: parameter ("," parameter)*
+parameter: "PARAM" IDENTIFIER "AS" type
+
+// Types
+?type: basetype | list_type | map_type
+basetype: "INTEGER" -> basetype_integer
+       | "FLOAT" -> basetype_float
+       | "STRING" -> basetype_string
+       | "BOOLEAN" -> basetype_boolean
+       | "NULLTYPE" -> basetype_nulltype
+list_type: "LIST" "<" type ">"
+map_type: "MAP" "<" type "," type ">"
+
+// Expressions (Handles precedence: *,/ > +,- > comparisons > logical)
+?expression: logical_or
+
+?logical_or: logical_and ("OR" logical_and)*
+?logical_and: comparison ("AND" comparison)*
+?comparison: arith_expr [( "==" | "!=" | "<" | "<=" | ">" | ">=" ) arith_expr]
+?arith_expr: term (("+" | "-") term)*
+?term: factor (("*" | "/") factor)*
+?factor: ("+" | "-" | "NOT") factor | atom // Unary operators
+
+?atom: NUMBER | FLOAT_NUMBER | STRING_LITERAL | BOOLEAN_LITERAL | NULL_LITERAL
+     | IDENTIFIER
+     | list_literal | map_literal // Added literals
+     | function_call
+     | "(" expression ")"
+
+// Literals
+NUMBER: SIGNED_INT
+FLOAT_NUMBER: SIGNED_FLOAT
+STRING_LITERAL: ESCAPED_STRING
+BOOLEAN_LITERAL: "TRUE" | "FALSE"
+NULL_LITERAL: "NULL"
+
+// Added Literals for basic list/map creation (alternative to CREATE_LIST/MAP calls)
+list_literal: "[" [expression ("," expression)*] "]"
+map_literal: "{" [map_entry ("," map_entry)*] "}"
+map_entry: expression ":" expression
+
+// Function Calls (e.g., CALL MyFunc(arg1, arg2) or MyFunc(arg1, arg2))
+// Decide if CALL is mandatory. Let's make it mandatory for LLM clarity.
+function_call: "CALL" IDENTIFIER "(" [arguments] ")"
+arguments: expression ("," expression)*
+
+// Terminals and Imports
+IDENTIFIER: CNAME
+COMMENT: "//" /[^\n]*/
+_TERMINATOR: ";" | _NL // Statements end with newline or semicolon (optional)
+
+%import common.SIGNED_INT
+%import common.SIGNED_FLOAT
+%import common.ESCAPED_STRING
+%import common.CNAME
+%import common.WS_INLINE
+%import common.NEWLINE -> _NL
+
+%ignore WS_INLINE
+%ignore COMMENT // Ignore comments during parsing
+%ignore _NL+ // Treat consecutive newlines like one for structure, but _TERMINATOR uses it.

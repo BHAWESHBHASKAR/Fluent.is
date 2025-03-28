@@ -1,0 +1,34 @@
+// File: examples/find_max.is
+// Find the maximum value in a list of integers
+
+FUNCTION find_maximum(PARAM numbers AS LIST<INTEGER>) RETURNS INTEGER;
+  // Check if the list is empty
+  IF CALL GET_LENGTH(numbers) == 0 THEN
+    // Return a sentinel value for empty lists
+    RETURN -1;
+  ENDIF;
+  
+  // Initialize max to the first element
+  VAR max_value AS INTEGER = CALL GET_ELEMENT(numbers, 0);
+  VAR i AS INTEGER = 1;
+  
+  // Iterate through the list to find the maximum
+  WHILE i < CALL GET_LENGTH(numbers);
+    VAR current AS INTEGER = CALL GET_ELEMENT(numbers, i);
+    IF current > max_value THEN
+      max_value = current;
+    ENDIF;
+    i = i + 1;
+  ENDWHILE;
+  
+  RETURN max_value;
+ENDFUNCTION;
+
+// Create a list of numbers
+VAR numbers AS LIST<INTEGER> = [23, 45, 12, 78, 34, 56, 9, 90, 3];
+
+// Find the maximum value
+VAR result AS INTEGER = CALL find_maximum(numbers);
+
+// Output the result
+PRINT result;  // Should print 90

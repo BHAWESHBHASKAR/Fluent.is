@@ -1,0 +1,16 @@
+// File: examples/greeting.is
+
+FUNCTION create_greeting(PARAM name AS STRING) RETURNS STRING;
+  VAR prefix AS STRING = "Hello, ";
+  VAR suffix AS STRING = "!";
+  VAR message AS STRING = CALL CONCATENATE_STRINGS(prefix, name);
+  message = CALL CONCATENATE_STRINGS(message, suffix);
+  RETURN message;
+ENDFUNCTION; // Terminator added
+
+VAR user_name AS STRING = "Fluent Builder";
+VAR greeting_message AS STRING;
+
+greeting_message = CALL create_greeting(user_name);
+
+PRINT greeting_message; // Output: Hello, Fluent Builder!
